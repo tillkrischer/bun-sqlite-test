@@ -1,31 +1,26 @@
 import * as fs from "fs";
 import { Database } from "bun:sqlite";
 
-const migrationsDir = "sql/";
-
-function checkMigrationExecuted(filename: string) {
-  try {
-    const query = db.query(`select name from migrations where name = $1;`);
-    const result = query.get(filename);
-    return result !== null;
-  } catch (e) {
-    return false;
-  }
-}
-
-function migrate(db: Database) {
+async function migrate(db: Database, migrationsDir: string) {
   const entries = fs.readdirSync(migrationsDir).toSorted();
   for (const filename of entries) {
-    if (!checkMigrationExecuted(filename)) {
-      console.log("executing " + filename);
-      const content = fs.readFileSync(migrationsDir + filename).toString();
-      db.query(content).run();
-      db.query(`insert into migrations (name)
-                values ($1);`)
-        .run(filename);
+    console.log("running " + filename);
+    try {
+      const content = await Bun.file(migrationsDir + filename).text();
+      const transaction = db.transaction(() => {
+        content
+          .split(";")
+          .filter((sql) => sql.trim().length > 0)
+          .forEach((sql) => {
+            db.run(sql);
+          });
+      });
+      transaction();
+    } catch (e) {
+      console.error("error: " + e.message);
     }
   }
 }
 
-const db = new Database("test.db");
-migrate(db);
+const db = new Database("test.db", { strict: true });
+migrate(db, "sql/");
